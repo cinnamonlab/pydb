@@ -1,8 +1,4 @@
+from repositories.unit_of_work import UnitOfWork
 
-values = ["a", "b", "c"]
-t = ["%s"] * len(values)
-print(t)
-
-
-print (', '.join(map(str, values)))
-print(["'{}'".format(x) for x in values])
+petRepo = UnitOfWork().petRepo()
+print(petRepo.get_objects(where={"name":"Sandy", "column":["Nah", "Hungry", "Lennon"], "id": 1}))

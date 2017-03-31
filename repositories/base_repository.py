@@ -8,7 +8,7 @@ class BaseRepository:
 
     __selectQuery = "SELECT * FROM {table}"
     __insertQuery = "INSERT INTO {table} ({columns}) VALUES ({values})"
-    __updateQuery = "UPDATE {table} SET {updateData} WHERE {condition}"
+    __updateQuery = "UPDATE {table} SET {setData} WHERE {condition}"
     __deleteQuery = "DELETE FROM {table} WHERE {condition}"
 
     __defaultOrder = {"modified": "DESC"}
@@ -22,6 +22,8 @@ class BaseRepository:
         '''
         self.__db = db
         self.__tableName = tableName
+
+    # Transactions
 
     def begin_transaction(self):
         self.__queries.clear()
@@ -42,6 +44,8 @@ class BaseRepository:
         finally:
             self.__db.endTransaction()
 
+    # Queries
+
     def get_objects(self, where={}, page=0, limit=20, orderBy=__defaultOrder):
         '''
         Get all objects, which matching condition {where}. Then sort by (orderBy} with {limit} at {page}.
@@ -56,10 +60,9 @@ class BaseRepository:
         try:
             self.__db.startTransaction()
             selectQuery = self.__parse_select_query(where=where, page=page, limit=limit, orderBy=orderBy)
+            objects = self.__db.fetch(selectQuery)
         except Exception as error:
             print("Error on get objects: ", error)
-        else:
-            objects = self.__db.fetch(selectQuery)
         finally:
             self.__db.endTransaction()
             return objects
@@ -76,10 +79,9 @@ class BaseRepository:
         try:
             self.__db.startTransaction()
             selectQuery = self.__parse_select_query(where=where, orderBy=orderBy, page=0, limit=1)
+            objects = self.__db.fetch(selectQuery)
         except Exception as error:
             print("Error on get first object: ", error)
-        else:
-            objects = self.__db.fetch(selectQuery)
         finally:
             self.__db.endTransaction()
             return next(iter(objects), None)
@@ -144,23 +146,12 @@ class BaseRepository:
         deleteQuery = self.__parse_delete_query(where={"id": id})
         self.__queries.append(deleteQuery)
 
+    # Parsers
+
     def __parse_select_query(self, where={}, page=0, limit=20, orderBy={}):
         # Check data before parsing
         if None in (where, page, limit, orderBy):
             raise ValueError("'None' input is not accepted.")
-
-        # Parse `where` data
-        whereClauses = []
-        for key, value in where.items():
-            if isinstance(key, str) == False:
-                raise ValueError("Column '{}' must be a string.".format(key))
-            if isinstance(value, dict):
-                raise ValueError("Value of column '{}' must be a string/number/list/set.".format(key))
-            if isinstance(value, list) or isinstance(value, set):
-                value = ", ".join(["'{}'".format(x) for x in value])
-            else:
-                value = "'{}'".format(value)
-            whereClauses.append("`{k}` IN ({v})".format(k=key, v=value))
 
         # Parse `orderBy` data
         orderClauses = []
@@ -174,8 +165,9 @@ class BaseRepository:
         # Create SELECT query
         selectQuery = self.__selectQuery.format(table=self.__tableName)
         # Attach WHERE query
-        if len(whereClauses) > 0:
-            selectQuery += " WHERE {}".format(" AND ".join(whereClauses))
+        whereContent = self.__parse_where_content(where)
+        if len(whereContent) > 0:
+            selectQuery += " WHERE {}".format(whereContent)
         # Attach ORDER query
         if len(orderClauses) > 0:
             selectQuery += " ORDER BY {}".format(", ".join(orderClauses))
@@ -200,23 +192,10 @@ class BaseRepository:
                 raise ValueError("Value of column '{}' must be a string/number.".format(key))
             setClauses.append("`{k}` = '{v}'".format(k=key, v=value))
 
-        # Parse `where` data
-        whereClauses = []
-        for key, value in where.items():
-            if isinstance(key, str) == False:
-                raise ValueError("Column '{}' must be a string.".format(key))
-            if isinstance(value, dict):
-                raise ValueError("Value of column '{}' must be a string/number/list/set.".format(key))
-            if isinstance(value, list) or isinstance(value, set):
-                value = ', '.join(["'{}'".format(x) for x in value])
-            else:
-                value = "'{}'".format(value)
-            whereClauses.append("`{k}` IN ({v})".format(k=key, v=value))
-
         # Create UPDATE query
-        setQuery = " , ".join(setClauses)
-        whereQuery = " AND ".join(whereClauses)
-        updateQuery = self.__updateQuery.format(table=self.__tableName, updateData=setQuery, condition=whereQuery)
+        setContent = " , ".join(setClauses)
+        whereContent = self.__parse_where_content(where)
+        updateQuery = self.__updateQuery.format(table=self.__tableName, setData=setContent, condition=whereContent)
 
         return updateQuery
 
@@ -236,9 +215,9 @@ class BaseRepository:
         valueClauses = ["'{}'".format(v) for v in fields.values()]
 
         # Create INSERT query
-        columnQuery = " , ".join(columnsClauses)
-        valueQuery = " , ".join(valueClauses)
-        insertQuery = self.__insertQuery.format(table=self.__tableName, columns=columnQuery, values=valueQuery)
+        columnContent = " , ".join(columnsClauses)
+        valueContent = " , ".join(valueClauses)
+        insertQuery = self.__insertQuery.format(table=self.__tableName, columns=columnContent, values=valueContent)
 
         return insertQuery
 
@@ -249,7 +228,14 @@ class BaseRepository:
         if  len(where) == 0:
             raise ValueError("Delete query has empty `where`.")
 
+        whereContent = self.__parse_where_content(where)
+        deleteQuery = self.__deleteQuery.format(table=self.__tableName, condition=whereContent)
+
+        return deleteQuery
+
+    def __parse_where_content(self, where: dict):
         # Parse `where` data
+        whereContent = ""
         whereClauses = []
         for key, value in where.items():
             if isinstance(key, str) == False:
@@ -262,7 +248,5 @@ class BaseRepository:
                 value = "'{}'".format(value)
             whereClauses.append("`{k}` IN ({v})".format(k=key, v=value))
 
-        whereQuery = " AND ".join(whereClauses)
-        deleteQuery = self.__deleteQuery.format(table=self.__tableName, condition=whereQuery)
-
-        return deleteQuery
+        whereContent = " AND ".join(whereClauses)
+        return whereContent
